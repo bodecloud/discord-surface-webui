@@ -12,6 +12,7 @@ from .search import search
 from .search import get_autocomplete
 from .messages import get_messages
 from .archive import manage
+from .bridge import get_message
 
 # fix PIPE encoding error on Windows, auto flush print
 sys.stdout.reconfigure(encoding='utf-8')
@@ -36,7 +37,7 @@ app.include_router(get_autocomplete.router)
 
 app.include_router(get_messages.router)
 app.include_router(manage.router)
-
+app.include_router(get_message.router)
 
 
 

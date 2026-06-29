@@ -6,6 +6,7 @@ from FileFinder import FileFinder
 from MongoDatabase import MongoDatabase
 from AssetProcessor import AssetProcessor
 from JsonProcessor import JsonProcessor
+from MatrixProcessor import MatrixProcessor
 from Timer import Timer
 from Eta import Eta
 from Formatters import Formatters
@@ -95,13 +96,20 @@ def main(input_dir):
 
 	file_finder = FileFinder(input_dir)
 
+	matrix_jsons = file_finder.find_matrix_exports()
 	jsons = file_finder.find_channel_exports()
+	matrix_jsons_set = set(matrix_jsons)
+	jsons = [json_path for json_path in jsons if json_path not in matrix_jsons_set]
+
 	jsons_count_before = len(jsons)
 	jsons = remove_processed_jsons(database, jsons)
+	matrix_jsons_count_before = len(matrix_jsons)
+	matrix_jsons = remove_processed_jsons(database, matrix_jsons)
 	jsons_count = len(jsons)
+	matrix_jsons_count = len(matrix_jsons)
 	jsons_size = 0
 	invalid_jsons = []
-	for json_path in jsons:
+	for json_path in jsons + matrix_jsons:
 		try:
 			jsons_size += os.path.getsize(file_finder.add_base_directory(json_path))
 		except FileNotFoundError:
@@ -109,10 +117,15 @@ def main(input_dir):
 			invalid_jsons.append(json_path)
 
 	for invalid_json in invalid_jsons:
-		jsons.remove(invalid_json)
+		if invalid_json in jsons:
+			jsons.remove(invalid_json)
+		if invalid_json in matrix_jsons:
+			matrix_jsons.remove(invalid_json)
 
 	print(f"    found {jsons_count} new possible json channel exports")
 	print(f"    found {jsons_count_before - jsons_count} already processed json channel exports")
+	print(f"    found {matrix_jsons_count} new Matrix bridge exports")
+	print(f"    found {matrix_jsons_count_before - matrix_jsons_count} already processed Matrix bridge exports")
 	print(f"    {Formatters.human_file_size(jsons_size)} is total size of new json exports")
 
 	asset_processor = AssetProcessor(file_finder, database)
@@ -126,6 +139,15 @@ def main(input_dir):
 			print(f"ETA {eta.calculate_eta().ljust(8)}  {(str(index + 1) + '/' + str(jsons_count)).ljust(9)} ({(str(round(processed_bytes / jsons_size * 100, 2)) + '%)').ljust(7)}  processing {json_path}")
 
 			p = JsonProcessor(database, file_finder, json_path, asset_processor, index, jsons_count)
+			p.process()
+			eta.increment(size)
+
+		for index, json_path in enumerate(matrix_jsons):
+			size = os.path.getsize(file_finder.add_base_directory(json_path))
+			processed_bytes += size
+			print(f"ETA {eta.calculate_eta().ljust(8)}  {(str(index + 1) + '/' + str(matrix_jsons_count)).ljust(9)} ({(str(round(processed_bytes / jsons_size * 100, 2)) + '%)').ljust(7)}  processing Matrix {json_path}")
+
+			p = MatrixProcessor(database, file_finder, json_path, asset_processor, index, matrix_jsons_count)
 			p.process()
 			eta.increment(size)
 
@@ -150,4 +172,3 @@ if __name__ == "__main__":
 
 	with Timer("Preprocess"):
 		main(input_dir)
-

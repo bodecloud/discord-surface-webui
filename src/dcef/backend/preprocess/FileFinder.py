@@ -1,5 +1,6 @@
 import functools
 import glob
+import json
 import re
 import os
 
@@ -34,6 +35,48 @@ class FileFinder():
 
 
 		return files
+
+	def find_matrix_exports(self):
+		print("finding Matrix bridge exports in " + self.base_directory)
+		directory = self.base_directory
+		files = []
+		for filename in glob.glob(directory + '**/*.json', recursive=True, include_hidden=True):
+			if self.looks_like_matrix_export(filename):
+				files.append(self.remove_base_directory(filename))
+		return files
+
+	def looks_like_matrix_export(self, filename: str) -> bool:
+		normalized = self.normalize_path(filename).lower()
+		path_hint = any(part in normalized for part in ("/matrix", "/ooye", "/out-of-your-element"))
+		try:
+			with open(filename, "r", encoding="utf-8") as handle:
+				prefix = handle.read(262144)
+		except (UnicodeDecodeError, OSError):
+			return False
+
+		if not path_hint and not any(token in prefix for token in ('"room_id"', '"event_id"', '"origin_server_ts"', '"m.room.message"', '"m.sticker"')):
+			return False
+
+		try:
+			payload = json.loads(prefix)
+		except json.JSONDecodeError:
+			# Large Matrix exports are still useful to detect without loading the
+			# full file. DCE exports do not contain Matrix room/event markers.
+			return '"room_id"' in prefix and ('"event_id"' in prefix or '"origin_server_ts"' in prefix)
+
+		if not isinstance(payload, dict):
+			return False
+		if "guild" in payload and "channel" in payload and "messages" in payload:
+			return False
+		if "room_id" in payload and ("event_id" in payload or "events" in payload or "chunk" in payload):
+			return True
+		if "events" in payload and isinstance(payload["events"], list):
+			return any(isinstance(item, dict) and ("event_id" in item or "raw" in item) for item in payload["events"][:20])
+		if "chunk" in payload and isinstance(payload["chunk"], list):
+			return any(isinstance(item, dict) and "event_id" in item for item in payload["chunk"][:20])
+		if "rooms" in payload and isinstance(payload["rooms"], dict):
+			return True
+		return False
 
 	def find_local_assets(self):
 		print("finding local assets in " + self.base_directory)
