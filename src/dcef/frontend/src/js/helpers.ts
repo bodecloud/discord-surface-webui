@@ -7,6 +7,9 @@ export function checkUrl(asset) {
 	const url = asset.path;
     if (!url)
         return "";
+    if (url.startsWith('/')) {
+        return url;
+    }
     if (url.startsWith('https') || url.startsWith('http')) {
         console.warn('online url', url);
         return url;

@@ -2,6 +2,7 @@ import functools
 import hashlib
 import json
 import os
+import urllib.parse
 from datetime import datetime, timezone
 
 from pymongo import UpdateOne
@@ -85,6 +86,25 @@ class MatrixProcessor:
 		}
 
 	@staticmethod
+	def mxc_to_proxy_url(url: str) -> str:
+		if not isinstance(url, str) or not url.startswith("mxc://"):
+			return url
+		parts = url.removeprefix("mxc://").split("/", 1)
+		if len(parts) != 2 or not parts[0] or not parts[1]:
+			return url
+		server = urllib.parse.quote(parts[0], safe="")
+		media_id = urllib.parse.quote(parts[1], safe="")
+		return f"/api/bridge/mxc/{server}/{media_id}"
+
+	@staticmethod
+	def emoji_asset(key: str) -> dict:
+		codepoints = "-".join(f"{ord(char):x}" for char in key if ord(char) != 0xfe0f)
+		if codepoints:
+			url = f"https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/{codepoints}.svg"
+			return MatrixProcessor.remote_asset(url, "svg", "image")
+		return MatrixProcessor.default_avatar_asset(key or "reaction")
+
+	@staticmethod
 	def load_matrix_payload(path: str):
 		with open(path, "r", encoding="utf-8") as handle:
 			return json.load(handle)
@@ -143,16 +163,40 @@ class MatrixProcessor:
 	@staticmethod
 	def is_message_event(event: dict) -> bool:
 		content = event.get("content") or {}
-		return event.get("type") in ("m.room.message", "m.sticker") and isinstance(content, dict)
+		return event.get("type") in ("m.room.message", "m.sticker") and isinstance(content, dict) and not MatrixProcessor.is_edit_event(event)
+
+	@staticmethod
+	def relation(event: dict) -> dict:
+		content = event.get("content") or {}
+		relation = content.get("m.relates_to") or content.get("m.relationship") or {}
+		return relation if isinstance(relation, dict) else {}
+
+	@staticmethod
+	def is_edit_event(event: dict) -> bool:
+		return MatrixProcessor.relation(event).get("rel_type") == "m.replace" and "m.new_content" in (event.get("content") or {})
+
+	@staticmethod
+	def is_reaction_event(event: dict) -> bool:
+		return event.get("type") == "m.reaction" and MatrixProcessor.relation(event).get("rel_type") == "m.annotation"
+
+	@staticmethod
+	def is_redaction_event(event: dict) -> bool:
+		return event.get("type") == "m.room.redaction" or event.get("redacts") or (event.get("content") or {}).get("redacts")
+
+	@staticmethod
+	def target_event_id(event: dict) -> str | None:
+		return event.get("redacts") or (event.get("content") or {}).get("redacts") or MatrixProcessor.relation(event).get("event_id")
 
 	@staticmethod
 	def body_from_event(event: dict) -> str:
 		content = event.get("content") or {}
+		if MatrixProcessor.is_edit_event(event):
+			content = content.get("m.new_content") or content
 		body = content.get("body") or content.get("formatted_body") or ""
 		if content.get("msgtype") in ("m.image", "m.video", "m.audio", "m.file") and content.get("url"):
 			body = body or content.get("filename") or content.get("url")
 			if content["url"].startswith("mxc://"):
-				body = f"{body}\n{content['url']}"
+				body = f"{body}\n{MatrixProcessor.mxc_to_proxy_url(content['url'])}"
 		return body
 
 	@staticmethod
@@ -163,7 +207,9 @@ class MatrixProcessor:
 		if msgtype not in ("m.image", "m.video", "m.audio", "m.file") or not url:
 			return None
 		info = content.get("info") or {}
-		if url.startswith("http://") or url.startswith("https://"):
+		if url.startswith("mxc://"):
+			url = MatrixProcessor.mxc_to_proxy_url(url)
+		if url.startswith("http://") or url.startswith("https://") or url.startswith("/api/bridge/mxc/"):
 			filetype = {
 				"m.image": "image",
 				"m.video": "video",
@@ -178,6 +224,34 @@ class MatrixProcessor:
 				height=info.get("h"),
 			)
 		return None
+
+	def reaction_from_event(self, event: dict) -> dict:
+		key = MatrixProcessor.relation(event).get("key") or "?"
+		author = self.author_from_event(event, MATRIX_GUILD_ID)
+		return {
+			"emoji": {
+				"_id": MatrixProcessor.numeric_id(key, "matrix-reaction"),
+				"name": key,
+				"isAnimated": False,
+				"image": MatrixProcessor.emoji_asset(key),
+				"source": "default",
+				"guildId": None,
+			},
+			"count": 1,
+			"users": [{
+				"_id": author["_id"],
+				"name": author["name"],
+				"nickname": author["nickname"],
+				"isBot": author["isBot"],
+				"avatar": author["avatar"],
+			}],
+			"bridge": {
+				"platform": "matrix",
+				"event_id": event.get("event_id"),
+				"room_id": event.get("room_id"),
+				"sender": event.get("sender"),
+			}
+		}
 
 	def author_from_event(self, event: dict, guild_id: str) -> dict:
 		mxid = event.get("sender") or event.get("user_id") or "@unknown:matrix"
@@ -236,6 +310,85 @@ class MatrixProcessor:
 			message["attachments"] = [attachment]
 		return message
 
+	def find_message_by_event_id(self, event_id: str):
+		if event_id is None:
+			return None
+		return self.collections["messages"].find_one({"bridge.event_id": event_id})
+
+	def append_related_event(self, message: dict, event: dict, relation_type: str):
+		related = (message.get("bridge") or {}).get("related_events") or []
+		if event.get("event_id") in [item.get("event_id") for item in related]:
+			return related
+		related.append({
+			"event_id": event.get("event_id"),
+			"event_type": event.get("type"),
+			"relation_type": relation_type,
+			"sender": event.get("sender"),
+			"origin_server_ts": event.get("origin_server_ts"),
+			"raw": event,
+		})
+		return related
+
+	def apply_edit(self, event: dict):
+		target = self.find_message_by_event_id(MatrixProcessor.target_event_id(event))
+		if target is None:
+			return
+		new_content = (event.get("content") or {}).get("m.new_content") or {}
+		edited_at = MatrixProcessor.iso_from_ts(event.get("origin_server_ts"))
+		content_history = target.get("content") or []
+		prior_content = content_history[0] if content_history else None
+		updated_content = {
+			"timestamp": edited_at,
+			"content": MatrixProcessor.body_from_event({**event, "content": new_content}),
+		}
+		new_history = [updated_content]
+		if prior_content is not None and prior_content.get("content") != updated_content["content"]:
+			new_history.append(prior_content)
+		new_history.extend(content_history[1:])
+		self.collections["messages"].update_one({"_id": target["_id"]}, {"$set": {
+			"content": new_history,
+			"timestampEdited": edited_at,
+			"bridge.related_events": self.append_related_event(target, event, "m.replace"),
+		}})
+
+	def apply_reaction(self, event: dict):
+		target = self.find_message_by_event_id(MatrixProcessor.target_event_id(event))
+		if target is None:
+			return
+		reaction = self.reaction_from_event(event)
+		reactions = target.get("reactions") or []
+		existing = next((item for item in reactions if item.get("emoji", {}).get("_id") == reaction["emoji"]["_id"]), None)
+		if existing is None:
+			reactions.append(reaction)
+		else:
+			users = existing.get("users") or []
+			if reaction["users"][0]["_id"] not in [user.get("_id") for user in users]:
+				users.append(reaction["users"][0])
+			existing["users"] = users
+			existing["count"] = len(users)
+		self.collections["messages"].update_one({"_id": target["_id"]}, {"$set": {
+			"reactions": reactions,
+			"bridge.related_events": self.append_related_event(target, event, "m.annotation"),
+		}})
+
+	def apply_redaction(self, event: dict):
+		target = self.find_message_by_event_id(MatrixProcessor.target_event_id(event))
+		if target is None:
+			return
+		self.collections["messages"].update_one({"_id": target["_id"]}, {"$set": {
+			"isDeleted": True,
+			"bridge.related_events": self.append_related_event(target, event, "m.room.redaction"),
+		}})
+
+	def apply_related_events(self, events: list):
+		for event in sorted(events, key=lambda item: item.get("origin_server_ts", 0)):
+			if MatrixProcessor.is_edit_event(event):
+				self.apply_edit(event)
+			elif MatrixProcessor.is_reaction_event(event):
+				self.apply_reaction(event)
+			elif MatrixProcessor.is_redaction_event(event):
+				self.apply_redaction(event)
+
 	def room_name(self, room_id: str, events: list, payload: dict) -> str:
 		if isinstance(payload.get("room_name"), str):
 			return payload["room_name"]
@@ -276,8 +429,9 @@ class MatrixProcessor:
 			print("invalid matrix file " + self.json_path)
 			return
 
-		events = [event for event in MatrixProcessor.extract_events(payload) if MatrixProcessor.is_message_event(event)]
-		if len(events) == 0:
+		all_events = MatrixProcessor.extract_events(payload)
+		events = [event for event in all_events if MatrixProcessor.is_message_event(event)]
+		if len(events) == 0 and len(all_events) == 0:
 			print("matrix file has no supported message events " + self.json_path)
 			self.mark_as_processed()
 			return
@@ -328,6 +482,8 @@ class MatrixProcessor:
 				self.collections["messages"].bulk_write([UpdateOne({"_id": message["_id"]}, {"$set": message}, upsert=True) for message in messages])
 
 			self.collections["channels"].update_one({"_id": channel_id}, {"$set": {"msg_count": self.collections["messages"].count_documents({"channelId": channel_id})}})
+
+		self.apply_related_events(all_events)
 
 		self.collections["guilds"].update_one({"_id": MATRIX_GUILD_ID}, {"$set": {"msg_count": self.collections["messages"].count_documents({})}})
 		for author in self.collections["authors"].find({"guildIds": MATRIX_GUILD_ID}, {"_id": 1}):

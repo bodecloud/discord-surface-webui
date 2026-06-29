@@ -1,6 +1,8 @@
 import re
+import urllib.parse
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse
 
 from ..common.Database import Database
 from ..common.helpers import pad_id
@@ -34,12 +36,14 @@ def matrix_author_from_message(message: dict):
 	}
 
 
-def bridge_event_from_message(message: dict):
+MATRIX_SERVER_RE = re.compile(r"^[A-Za-z0-9.-]+(?::[0-9]{1,5})?$")
+
+
+def bridge_event_payload(message: dict, raw: dict, metadata: dict | None = None, relation: dict | None = None):
 	bridge = message.get("bridge") or {}
 	matrix = bridge if bridge.get("platform") == "matrix" else {}
-	raw = matrix.get("raw") or {}
 	content = raw.get("content") or {}
-	metadata = raw.get("ooye_metadata") or {
+	event_metadata = metadata or raw.get("ooye_metadata") or {
 		"sender": matrix.get("sender") or raw.get("sender"),
 		"event_id": matrix.get("event_id") or raw.get("event_id"),
 		"event_type": matrix.get("event_type") or raw.get("type"),
@@ -49,17 +53,36 @@ def bridge_event_from_message(message: dict):
 		"room_id": matrix.get("room_id") or raw.get("room_id"),
 		"source": 0,
 	}
-	return {
-		"metadata": metadata,
+	payload = {
+		"metadata": event_metadata,
 		"raw": raw,
 	}
+	if relation is not None:
+		payload["relation"] = relation
+	return payload
+
+
+def bridge_events_from_message(message: dict):
+	bridge = message.get("bridge") or {}
+	matrix = bridge if bridge.get("platform") == "matrix" else {}
+	raw = matrix.get("raw") or {}
+	events = [bridge_event_payload(message, raw)]
+	for related in matrix.get("related_events") or []:
+		related_raw = related.get("raw") or {}
+		events.append(bridge_event_payload(message, related_raw, relation={
+			"event_id": related.get("event_id"),
+			"event_type": related.get("event_type"),
+			"relation_type": related.get("relation_type"),
+			"sender": related.get("sender"),
+		}))
+	return events
 
 
 def response_for_message(message: dict):
 	source = "matrix" if (message.get("bridge") or {}).get("platform") == "matrix" else "discord"
 	response = {
 		"source": source,
-		"events": [bridge_event_from_message(message)] if source == "matrix" else [],
+		"events": bridge_events_from_message(message) if source == "matrix" else [],
 	}
 	author = matrix_author_from_message(message)
 	if author is not None:
@@ -82,3 +105,23 @@ async def get_bridge_message(message_id: str):
 	if message is None:
 		raise HTTPException(status_code=404, detail="message not found")
 	return response_for_message(message)
+
+
+@router.get("/bridge/mxc/{server}/{media_id:path}")
+async def get_matrix_media(server: str, media_id: str):
+	"""
+	Redirect Matrix content URIs to the homeserver media download endpoint.
+
+	The importer stores `mxc://server/media` as `/api/bridge/mxc/server/media`
+	so the existing Discord-shaped attachment renderer can display Matrix media.
+	"""
+	server = urllib.parse.unquote(server)
+	media_id = urllib.parse.unquote(media_id)
+	if MATRIX_SERVER_RE.match(server) is None or media_id.strip("/") == "":
+		raise HTTPException(status_code=422, detail="invalid Matrix media URI")
+	encoded_server = urllib.parse.quote(server, safe="")
+	encoded_media = urllib.parse.quote(media_id.strip("/"), safe="")
+	return RedirectResponse(
+		f"https://{server}/_matrix/media/v3/download/{encoded_server}/{encoded_media}",
+		status_code=307,
+	)

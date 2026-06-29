@@ -20,14 +20,18 @@ Current event coverage:
 
 - `m.room.message` text events
 - Matrix media message types with HTTP media URLs as DCEF attachments
-- Matrix media message types with `mxc://` URLs retained in message metadata/content
+- Matrix media message types with `mxc://` URLs rewritten to `/api/bridge/mxc/...` attachment URLs
 - `m.sticker` events as message-like events
+- `m.replace` edit events into DCEF message history and `timestampEdited`
+- `m.annotation` reaction events into DCEF reactions
+- `m.room.redaction` events into DCEF deleted-message state
 - OOYE event metadata when present
+- Related Matrix events in the OOYE-compatible `events` response array
+- Matrix media redirect endpoint:
+  - `GET /api/bridge/mxc/{server}/{media_id}`
 
 Next parity slices:
 
-- Matrix media proxy for `mxc://` URLs so attachments render natively.
-- Edit/redaction/reaction import into DCEF message history and reaction fields.
 - Matrix room state import for names, topics, avatars, spaces, and membership.
 - Live Matrix appservice ingestion instead of file/API payload import only.
 - Bidirectional send/edit/delete/reaction actions matching OOYE's `d2m` and `m2d` action split.
