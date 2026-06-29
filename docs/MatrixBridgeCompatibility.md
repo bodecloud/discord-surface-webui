@@ -29,9 +29,15 @@ Current event coverage:
 - Related Matrix events in the OOYE-compatible `events` response array
 - Matrix media redirect endpoint:
   - `GET /api/bridge/mxc/{server}/{media_id}`
+- Matrix room state:
+  - `m.room.name` into channel names
+  - `m.room.topic` into channel topics
+  - `m.room.avatar` into preserved bridge metadata
+  - `m.room.member` display names and avatars into DCEF authors
+  - `m.space.child` / `m.space.parent` into Matrix space-backed categories
+- Encrypted Matrix media payloads that expose `content.file.url`
 
 Next parity slices:
 
-- Matrix room state import for names, topics, avatars, spaces, and membership.
 - Live Matrix appservice ingestion instead of file/API payload import only.
 - Bidirectional send/edit/delete/reaction actions matching OOYE's `d2m` and `m2d` action split.
