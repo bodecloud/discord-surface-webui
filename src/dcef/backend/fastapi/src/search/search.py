@@ -10,7 +10,7 @@ from ..common.enrich_messages import enrich_messages_with_referenced
 from ..common.helpers import pad_id, print_json
 from ..common.Database import Database
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from ..common.Database import Database
 
@@ -321,19 +321,20 @@ def extend_users(user_ids: list, usernames: list, guild_id: str):
 
 
 @router.get("/guild/search")
-async def search_messages(guild_id: str, prompt: str = None, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100):
-	return await search_messages_(guild_id, prompt, prev_page_cursor, around_page_cursor, next_page_cursor, limit, return_count=False)
+async def search_messages(guild_id: str, request: Request, prompt: str = None, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100):
+	return await search_messages_(guild_id, request, prompt, prev_page_cursor, around_page_cursor, next_page_cursor, limit, return_count=False)
 
 @router.get("/guild/search/count")
-async def count_messages(guild_id: str, prompt: str = None):
-	return await search_messages_(guild_id, prompt, prev_page_cursor=None, around_page_cursor=None, next_page_cursor=None, limit=0, return_count=True)
+async def count_messages(guild_id: str, request: Request, prompt: str = None):
+	return await search_messages_(guild_id, request, prompt, prev_page_cursor=None, around_page_cursor=None, next_page_cursor=None, limit=0, return_count=True)
 
 
-async def search_messages_(guild_id: str, prompt: str = None, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100, return_count: bool = False):
+async def search_messages_(guild_id: str, request: Request, prompt: str = None, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100, return_count: bool = False):
 	"""
 	Searches for messages that contain the prompt.
 	"""
 
+	Database.require_dm_access(guild_id, request)
 	collection_messages = Database.get_guild_collection(guild_id, "messages")
 
 	try:
@@ -593,4 +594,3 @@ async def search_messages_(guild_id: str, prompt: str = None, prev_page_cursor: 
 		print("/search error:")
 		traceback.print_exc()
 		return ["error"]
-

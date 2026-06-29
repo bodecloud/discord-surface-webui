@@ -1,5 +1,5 @@
 import re
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from ..common.helpers import pad_id
 from ..common.cursor_pagination import cursor_pagination
@@ -19,7 +19,7 @@ class MessageRequest(BaseModel):
 
 @router.get("/guild/messages")
 # async def get_message_ids(channel_id: str, guild_id: str, message_id: str = None, direction="around", limit=100):
-async def get_messages_cursor_pagination(channel_id: str, guild_id: str, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100):
+async def get_messages_cursor_pagination(channel_id: str, guild_id: str, request: Request, prev_page_cursor: str | None = None, around_page_cursor: str | None = None, next_page_cursor: str | None = None, limit=100):
 	"""
 	Returns a subset of messages for a channel.
 	Cursor based pagination.
@@ -32,6 +32,8 @@ async def get_messages_cursor_pagination(channel_id: str, guild_id: str, prev_pa
 	if re.match(r"^\d+$", channel_id) is None:
 		raise Exception("channel_id is not numeric")
 	#### ------------ end INPUT VALIDATION ------------ ####
+
+	Database.require_dm_access(guild_id, request)
 
 	guild_id = pad_id(guild_id)
 	channel_id = pad_id(channel_id)

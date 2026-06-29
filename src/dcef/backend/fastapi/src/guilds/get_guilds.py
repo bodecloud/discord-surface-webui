@@ -1,7 +1,7 @@
 import pymongo
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from ..common.Database import Database
+from ..common.Database import DM_GUILD_ID, Database
 
 router = APIRouter(
 	prefix="",
@@ -9,7 +9,7 @@ router = APIRouter(
 )
 
 @router.get("/guilds")
-async def get_guilds():
+async def get_guilds(request: Request):
 	"""
 	Returns a list of guilds
 	If allowlist is enabled (by not being an empty list), only allowlisted guilds will be returned.
@@ -20,13 +20,17 @@ async def get_guilds():
 	allowlisted_guild_ids = Database.get_allowlisted_guild_ids()
 
 	if len(allowlisted_guild_ids) == 0:
-		cursor = collection_guilds.find().sort([("msg_count", pymongo.DESCENDING)])
+		query = {}
+		if not Database.request_has_dm_access(request):
+			query["_id"] = {"$ne": DM_GUILD_ID}
+		cursor = collection_guilds.find(query).sort([("msg_count", pymongo.DESCENDING)])
 	else:
-		cursor = collection_guilds.find(
-			{
+		query = {
 				"_id": {
 					"$in": allowlisted_guild_ids
 				}
 			}
-		).sort([("msg_count", pymongo.DESCENDING)])
+		if not Database.request_has_dm_access(request):
+			query["_id"]["$ne"] = DM_GUILD_ID
+		cursor = collection_guilds.find(query).sort([("msg_count", pymongo.DESCENDING)])
 	return list(cursor)

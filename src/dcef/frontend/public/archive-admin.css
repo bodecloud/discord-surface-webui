@@ -1,0 +1,166 @@
+#archiveAdminRoot {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483000;
+  color: #e8edf2;
+  font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#archiveAdminRoot * {
+  box-sizing: border-box;
+}
+
+.archive-admin-toggle,
+.archive-admin button {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: #121820;
+  color: #e8edf2;
+  border-radius: 7px;
+  height: 34px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+
+.archive-admin-toggle {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.archive-admin {
+  display: none;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 88px));
+  overflow: auto;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: #10151c;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.48);
+}
+
+#archiveAdminRoot[data-open="true"] .archive-admin {
+  display: block;
+}
+
+.archive-admin header {
+  position: sticky;
+  top: 0;
+  padding: 12px 14px;
+  background: #151c25;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.archive-admin h2,
+.archive-admin h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.archive-admin h3 {
+  margin: 15px 0 8px;
+}
+
+.archive-admin .body {
+  padding: 12px 14px 14px;
+}
+
+.archive-admin .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.archive-admin input,
+.archive-admin select,
+.archive-admin textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #0c1117;
+  color: #e8edf2;
+  border-radius: 6px;
+  min-height: 34px;
+  padding: 7px 9px;
+  font: inherit;
+}
+
+.archive-admin textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.archive-admin .muted {
+  color: #a8b2bd;
+}
+
+.archive-admin .status {
+  margin-top: 8px;
+  color: #c7d2dc;
+}
+
+.archive-admin .list {
+  display: grid;
+  gap: 7px;
+}
+
+.archive-admin .item {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  padding: 9px;
+  background: #0d131a;
+}
+
+.archive-admin .item-title {
+  font-weight: 650;
+}
+
+.archive-admin .live-content {
+  margin-top: 6px;
+  color: #e8edf2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.archive-admin .item-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.archive-admin button.danger {
+  border-color: rgba(252, 82, 82, 0.45);
+  color: #ffd7d7;
+}
+
+.archive-admin button.primary {
+  background: #1e63b6;
+  border-color: #2f7bd4;
+}
+
+.archive-admin button:disabled {
+  opacity: 0.62;
+  cursor: wait;
+}
+
+.archive-admin .spin {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: archive-admin-spin 0.8s linear infinite;
+}
+
+@keyframes archive-admin-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 620px) {
+  #archiveAdminRoot {
+    right: 10px;
+    bottom: 10px;
+  }
+}

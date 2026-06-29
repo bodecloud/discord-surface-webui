@@ -1,10 +1,12 @@
 import pymongo
+from fastapi import HTTPException, Request
 
 URI = "mongodb://127.0.0.1:27017"
 client = pymongo.MongoClient(URI)
 db = client["dcef"]
 collection_guilds = db["guilds"]
 collection_config = db["config"]
+DM_GUILD_ID = "000000000000000000000000"
 
 def pad_id(id):
 	if id == None:
@@ -45,3 +47,16 @@ class Database:
 			raise Exception(f"Guild {guild_id} not allowlisted")
 
 		return db[f"g{padded_guild_id}_{collection_name}"]
+
+	@staticmethod
+	def is_dm_guild(guild_id):
+		return pad_id(guild_id) == DM_GUILD_ID
+
+	@staticmethod
+	def request_has_dm_access(request: Request):
+		return request.headers.get("x-dm-authorized", "").lower() == "true"
+
+	@staticmethod
+	def require_dm_access(guild_id, request: Request):
+		if Database.is_dm_guild(guild_id) and not Database.request_has_dm_access(request):
+			raise HTTPException(status_code=403, detail="Direct Messages require DM-specific authorization")
