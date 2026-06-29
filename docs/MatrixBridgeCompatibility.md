@@ -41,8 +41,12 @@ Current event coverage:
   - legacy `PUT /api/transactions/{txnId}`
   - optional `MATRIX_APPSERVICE_HS_TOKEN` / `MATRIX_HS_TOKEN` Bearer-token verification
   - idempotent transaction processing by transaction ID
+- Matrix appservice registration and namespace helpers:
+  - `GET /api/bridge/appservice/registration`
+  - `GET /api/bridge/appservice/registration?format=json`
+  - user namespace queries at `/_matrix/app/v1/users/{userId}` and `/users/{userId}`
+  - room alias namespace queries at `/_matrix/app/v1/rooms/{roomAlias}` and `/rooms/{roomAlias}`
 
 Next parity slices:
 
-- Matrix appservice registration generation and namespace/query helpers.
 - Bidirectional send/edit/delete/reaction actions matching OOYE's `d2m` and `m2d` action split.
