@@ -36,8 +36,13 @@ Current event coverage:
   - `m.room.member` display names and avatars into DCEF authors
   - `m.space.child` / `m.space.parent` into Matrix space-backed categories
 - Encrypted Matrix media payloads that expose `content.file.url`
+- Matrix appservice live ingestion:
+  - `PUT /api/_matrix/app/v1/transactions/{txnId}`
+  - legacy `PUT /api/transactions/{txnId}`
+  - optional `MATRIX_APPSERVICE_HS_TOKEN` / `MATRIX_HS_TOKEN` Bearer-token verification
+  - idempotent transaction processing by transaction ID
 
 Next parity slices:
 
-- Live Matrix appservice ingestion instead of file/API payload import only.
+- Matrix appservice registration generation and namespace/query helpers.
 - Bidirectional send/edit/delete/reaction actions matching OOYE's `d2m` and `m2d` action split.

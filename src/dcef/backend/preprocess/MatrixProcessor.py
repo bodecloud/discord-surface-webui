@@ -572,9 +572,7 @@ class MatrixProcessor:
 		json_path_with_base = self.file_finder.add_base_directory(self.json_path)
 		self.collections["jsons"].replace_one({"_id": self.json_path}, {"_id": self.json_path, "size": os.path.getsize(json_path_with_base), "date_modified": os.path.getmtime(json_path_with_base), "source": "matrix"}, upsert=True)
 
-	def process(self):
-		path = self.file_finder.add_base_directory(self.json_path)
-		payload = MatrixProcessor.load_matrix_payload(path)
+	def process_payload(self, payload, mark_processed: bool = True):
 		if not MatrixProcessor.looks_like_matrix_payload(payload):
 			print("invalid matrix file " + self.json_path)
 			return
@@ -648,4 +646,10 @@ class MatrixProcessor:
 		for author in self.collections["authors"].find({"guildIds": MATRIX_GUILD_ID}, {"_id": 1}):
 			self.collections["authors"].update_one({"_id": author["_id"]}, {"$set": {"msg_count": self.collections["messages"].count_documents({"author._id": author["_id"]})}})
 
-		self.mark_as_processed()
+		if mark_processed:
+			self.mark_as_processed()
+
+	def process(self):
+		path = self.file_finder.add_base_directory(self.json_path)
+		payload = MatrixProcessor.load_matrix_payload(path)
+		self.process_payload(payload, mark_processed=True)
