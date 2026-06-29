@@ -2,6 +2,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -186,6 +187,13 @@ class MatrixProcessor:
 		return relation if isinstance(relation, dict) else {}
 
 	@staticmethod
+	def reply_to_event_id(event: dict) -> str | None:
+		in_reply_to = MatrixProcessor.relation(event).get("m.in_reply_to") or {}
+		if isinstance(in_reply_to, dict):
+			return in_reply_to.get("event_id")
+		return None
+
+	@staticmethod
 	def is_edit_event(event: dict) -> bool:
 		return MatrixProcessor.relation(event).get("rel_type") == "m.replace" and "m.new_content" in (event.get("content") or {})
 
@@ -235,6 +243,25 @@ class MatrixProcessor:
 		if MatrixProcessor.is_edit_event(event):
 			content = content.get("m.new_content") or content
 		body = content.get("body") or content.get("formatted_body") or ""
+		if MatrixProcessor.reply_to_event_id(event):
+			formatted = content.get("formatted_body")
+			if isinstance(formatted, str) and formatted.startswith("<mx-reply>"):
+				formatted = re.sub(r"^<mx-reply>.*?</mx-reply>", "", formatted, flags=re.DOTALL)
+				if not content.get("body"):
+					body = re.sub(r"<[^>]+>", "", formatted or "")
+			if isinstance(body, str):
+				lines = body.split("\n")
+				stage = 0
+				for index, line in enumerate(lines):
+					if stage >= 0 and line.startswith(">"):
+						stage = 1
+						continue
+					if stage >= 1 and line.strip() == "":
+						stage = 2
+						continue
+					if stage == 2 and line.strip() != "":
+						body = "\n".join(lines[index:])
+						break
 		media_url = MatrixProcessor.media_url_from_content(content)
 		if content.get("msgtype") in ("m.image", "m.video", "m.audio", "m.file") and media_url:
 			body = body or content.get("filename") or media_url
@@ -330,9 +357,10 @@ class MatrixProcessor:
 		author = self.author_from_event(event, MATRIX_GUILD_ID)
 		timestamp = MatrixProcessor.iso_from_ts(event.get("origin_server_ts"))
 		content = event.get("content") or {}
+		reply_to_event_id = MatrixProcessor.reply_to_event_id(event)
 		message = {
 			"_id": MatrixProcessor.event_sortable_id(event, sequence),
-			"type": "Default",
+			"type": "Reply" if reply_to_event_id else "Default",
 			"timestamp": timestamp,
 			"timestampEdited": None,
 			"isPinned": False,
@@ -350,6 +378,7 @@ class MatrixProcessor:
 				"event_type": event.get("type"),
 				"event_subtype": content.get("msgtype"),
 				"sender": event.get("sender"),
+				"reply_to_event_id": reply_to_event_id,
 				"raw": event,
 			}
 		}
@@ -428,8 +457,37 @@ class MatrixProcessor:
 			"bridge.related_events": self.append_related_event(target, event, "m.room.redaction"),
 		}})
 
+	def apply_reply_reference(self, event: dict):
+		reply_to_event_id = MatrixProcessor.reply_to_event_id(event)
+		if reply_to_event_id is None:
+			return
+		message = self.find_message_by_event_id(event.get("event_id"))
+		if message is None:
+			return
+		target = self.find_message_by_event_id(reply_to_event_id)
+		if target is not None:
+			reference = {
+				"type": "Reply",
+				"messageId": target["_id"],
+				"channelId": target["channelId"],
+				"guildId": target["guildId"],
+			}
+		else:
+			reference = {
+				"type": "Reply",
+				"messageId": MatrixProcessor.numeric_id(reply_to_event_id, "matrix-reply-missing"),
+				"channelId": message["channelId"],
+				"guildId": message["guildId"],
+			}
+		self.collections["messages"].update_one({"_id": message["_id"]}, {"$set": {
+			"type": "Reply",
+			"reference": reference,
+			"bridge.reply_to_event_id": reply_to_event_id,
+		}})
+
 	def apply_related_events(self, events: list):
 		for event in sorted(events, key=lambda item: item.get("origin_server_ts", 0)):
+			self.apply_reply_reference(event)
 			if MatrixProcessor.is_edit_event(event):
 				self.apply_edit(event)
 			elif MatrixProcessor.is_reaction_event(event):

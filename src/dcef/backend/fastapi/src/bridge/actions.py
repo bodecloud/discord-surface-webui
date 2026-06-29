@@ -164,11 +164,46 @@ def message_content(payload: dict) -> str:
 	return ""
 
 
+def reply_to_event_id(payload: dict) -> str | None:
+	value = payload.get("reply_to_event_id") or payload.get("target_event_id")
+	return str(value) if value else None
+
+
+def reply_to_discord_message_id(payload: dict) -> str | None:
+	value = payload.get("reply_to_message_id") or payload.get("referenced_message_id")
+	return str(value) if value else None
+
+
+def mapped_matrix_target(payload: dict) -> tuple[str | None, str | None]:
+	room_id = payload.get("room_id") or payload.get("matrix_room_id")
+	event_id = reply_to_event_id(payload) or payload.get("event_id")
+	if event_id:
+		return room_id, str(event_id)
+	discord_message_id = reply_to_discord_message_id(payload) or payload.get("message_id") or payload.get("discord_message_id")
+	if discord_message_id:
+		mapping = mappings_collection().find_one({"discord_message_id": str(discord_message_id)})
+		if mapping:
+			return room_id or mapping.get("matrix_room_id"), mapping.get("matrix_event_id")
+	return room_id, None
+
+
+def mapped_discord_reply_message_id(payload: dict) -> str | None:
+	message_id = reply_to_discord_message_id(payload)
+	if message_id:
+		return message_id
+	target_event_id = reply_to_event_id(payload)
+	if target_event_id:
+		mapping = mappings_collection().find_one({"matrix_event_id": target_event_id})
+		if mapping:
+			return mapping.get("discord_message_id")
+	return None
+
+
 def matrix_event_content(payload: dict, action: str) -> dict:
 	if isinstance(payload.get("content"), dict):
 		return payload["content"]
 	if action == "reaction":
-		target = payload.get("target_event_id")
+		target = reply_to_event_id(payload)
 		if not target or MATRIX_EVENT_ID_RE.match(str(target)) is None:
 			raise HTTPException(status_code=422, detail="d2m reaction requires target_event_id")
 		return {
@@ -179,7 +214,7 @@ def matrix_event_content(payload: dict, action: str) -> dict:
 			}
 		}
 	if action == "edit":
-		target = payload.get("target_event_id")
+		target = reply_to_event_id(payload)
 		if not target or MATRIX_EVENT_ID_RE.match(str(target)) is None:
 			raise HTTPException(status_code=422, detail="d2m edit requires target_event_id")
 		content = message_content(payload)
@@ -192,7 +227,15 @@ def matrix_event_content(payload: dict, action: str) -> dict:
 				"event_id": target,
 			},
 		}
-	return {"body": message_content(payload), "msgtype": payload.get("msgtype") or "m.text"}
+	content = {"body": message_content(payload), "msgtype": payload.get("msgtype") or "m.text"}
+	_, target = mapped_matrix_target(payload)
+	if action == "send" and reply_to_discord_message_id(payload) and target is None and reply_to_event_id(payload) is None:
+		raise HTTPException(status_code=422, detail="d2m send reply requires a mapped Matrix event or explicit reply_to_event_id")
+	if action == "send" and target:
+		if MATRIX_EVENT_ID_RE.match(str(target)) is None:
+			raise HTTPException(status_code=422, detail="d2m send reply requires a valid Matrix target_event_id or mapped Discord message")
+		content["m.relates_to"] = {"m.in_reply_to": {"event_id": target}}
+	return content
 
 
 def find_matrix_message_by_event(event_id: str | None):
@@ -202,12 +245,16 @@ def find_matrix_message_by_event(event_id: str | None):
 	return db[f"g{guild}_messages"].find_one({"bridge.event_id": event_id})
 
 
-def record_mapping(direction: str, payload: dict, response: dict | None):
-	matrix_event_id = payload.get("event_id") or payload.get("target_event_id")
-	discord_message_id = payload.get("discord_message_id") or payload.get("message_id")
+def record_mapping(direction: str, action: str, payload: dict, response: dict | None):
+	matrix_event_id = payload.get("event_id")
+	discord_message_id = payload.get("discord_message_id")
+	if action == "send":
+		discord_message_id = discord_message_id or payload.get("message_id")
 	if response and isinstance(response.get("body"), dict):
-		discord_message_id = discord_message_id or response["body"].get("id")
-		matrix_event_id = matrix_event_id or response["body"].get("event_id")
+		if direction == "m2d":
+			discord_message_id = discord_message_id or response["body"].get("id")
+		if direction == "d2m":
+			matrix_event_id = matrix_event_id or response["body"].get("event_id")
 	if not matrix_event_id and not discord_message_id:
 		return
 	mappings_collection().update_one(
@@ -245,10 +292,16 @@ def discord_plan(action: str, payload: dict) -> dict:
 		channel_id = payload.get("discord_channel_id") or payload.get("channel_id")
 		if not channel_id:
 			raise HTTPException(status_code=422, detail="m2d send requires discord_channel_id or channel_id")
+		body = {"content": message_content(payload), "allowed_mentions": {"parse": []}}
+		reply_message_id = mapped_discord_reply_message_id(payload)
+		if (reply_to_event_id(payload) or reply_to_discord_message_id(payload)) and reply_message_id is None:
+			raise HTTPException(status_code=422, detail="m2d send reply requires a mapped Discord message or explicit reply_to_message_id")
+		if reply_message_id:
+			body["message_reference"] = {"message_id": reply_message_id}
 		return {
 			"method": "POST",
 			"url": f"{base}/channels/{channel_id}/messages",
-			"body": {"content": message_content(payload), "allowed_mentions": {"parse": []}},
+			"body": body,
 		}
 	if not channel_id or not message_id:
 		raise HTTPException(status_code=422, detail=f"m2d {action} requires a Discord channel/message mapping or explicit discord_channel_id and discord_message_id")
@@ -263,11 +316,11 @@ def discord_plan(action: str, payload: dict) -> dict:
 
 def matrix_plan(action: str, payload: dict) -> dict:
 	home = matrix_homeserver_url(payload) or "https://example.org"
-	room_id = payload.get("room_id") or payload.get("matrix_room_id")
+	room_id, target_event_id = mapped_matrix_target(payload)
 	if not room_id or MATRIX_ROOM_ID_RE.match(str(room_id)) is None:
 		raise HTTPException(status_code=422, detail="d2m action requires a Matrix room_id")
 	if action == "delete" or action == "remove_reaction":
-		target = payload.get("target_event_id") or payload.get("event_id")
+		target = target_event_id or payload.get("event_id")
 		if not target or MATRIX_EVENT_ID_RE.match(str(target)) is None:
 			raise HTTPException(status_code=422, detail=f"d2m {action} requires target_event_id")
 		txn_id = urllib.parse.quote(str(payload.get("txn_id") or stable_action_id("d2m", action, payload)[:24]), safe="")
@@ -304,7 +357,7 @@ def run_action(direction: str, action: str, payload: dict):
 	if missing:
 		return insert_or_update_action(direction, action, payload, "pending", plan, error=missing)
 	status = "sent" if response and 200 <= response["status"] < 300 else "failed"
-	record_mapping(direction, payload, response)
+	record_mapping(direction, action, payload, response)
 	return insert_or_update_action(direction, action, payload, status, plan, response=response)
 
 

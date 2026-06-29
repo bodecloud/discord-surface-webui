@@ -25,6 +25,7 @@ Current event coverage:
 - `m.replace` edit events into DCEF message history and `timestampEdited`
 - `m.annotation` reaction events into DCEF reactions
 - `m.room.redaction` events into DCEF deleted-message state
+- `m.in_reply_to` reply relations into DCEF `reference` links and reply rendering
 - OOYE event metadata when present
 - Related Matrix events in the OOYE-compatible `events` response array
 - Matrix media redirect endpoint:
@@ -51,9 +52,10 @@ Current event coverage:
   - `POST /api/bridge/actions/d2m/{send|edit|delete|reaction|remove_reaction}`
   - `POST /api/bridge/actions/batch`
   - `POST /api/bridge/actions/refresh`
+  - reply-aware sends using Matrix `m.in_reply_to` and Discord `message_reference`
   - actions read credentials from request payload, Mongo `config`, or env vars
   - when credentials are absent, actions are stored as pending outbox entries instead of failing
 
 Next parity slices:
 
-- Rich OOYE converters for replies, polls, embeds, files, webhooks, PluralKit, Matrix puppets, and power-level-sensitive moderation.
+- Rich OOYE converters for polls, embeds, files, webhooks, PluralKit, Matrix puppets, and power-level-sensitive moderation.
