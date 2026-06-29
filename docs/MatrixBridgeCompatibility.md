@@ -46,7 +46,14 @@ Current event coverage:
   - `GET /api/bridge/appservice/registration?format=json`
   - user namespace queries at `/_matrix/app/v1/users/{userId}` and `/users/{userId}`
   - room alias namespace queries at `/_matrix/app/v1/rooms/{roomAlias}` and `/rooms/{roomAlias}`
+- Bidirectional action outbox matching OOYE's `m2d` / `d2m` split:
+  - `POST /api/bridge/actions/m2d/{send|edit|delete|reaction|remove_reaction}`
+  - `POST /api/bridge/actions/d2m/{send|edit|delete|reaction|remove_reaction}`
+  - `POST /api/bridge/actions/batch`
+  - `POST /api/bridge/actions/refresh`
+  - actions read credentials from request payload, Mongo `config`, or env vars
+  - when credentials are absent, actions are stored as pending outbox entries instead of failing
 
 Next parity slices:
 
-- Bidirectional send/edit/delete/reaction actions matching OOYE's `d2m` and `m2d` action split.
+- Rich OOYE converters for replies, polls, embeds, files, webhooks, PluralKit, Matrix puppets, and power-level-sensitive moderation.

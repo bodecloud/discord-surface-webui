@@ -14,6 +14,7 @@ from .messages import get_messages
 from .archive import manage
 from .bridge import get_message
 from .bridge import appservice
+from .bridge import actions
 
 # fix PIPE encoding error on Windows, auto flush print
 sys.stdout.reconfigure(encoding='utf-8')
@@ -40,7 +41,7 @@ app.include_router(get_messages.router)
 app.include_router(manage.router)
 app.include_router(get_message.router)
 app.include_router(appservice.router)
-
+app.include_router(actions.router)
 
 
 
